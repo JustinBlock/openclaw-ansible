@@ -14,6 +14,20 @@
     group: "{{ openclaw_user }}"
     mode: '0755'
 
+- name: Create /opt/openclaw system workspace (for large files, shared data, installed tools)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ openclaw_user }}"
+    group: "{{ openclaw_user }}"
+    mode: '0755'
+  loop:
+    - /opt/openclaw
+    - /opt/openclaw/bin
+    - /opt/openclaw/data
+    - /opt/openclaw/cache
+    - /opt/openclaw/tools
+
 - name: Create OpenClaw directories (structure only, no config files)
   ansible.builtin.file:
     path: "{{ item.path }}"
@@ -88,6 +102,13 @@
   ansible.builtin.include_tasks: openclaw-development.yml
   when: openclaw_install_mode == "development"
 
+- name: Include OpenClaw auto-update timer
+  ansible.builtin.include_tasks: openclaw-autoupdate.yml
+  when:
+    - openclaw_install_mode == "release"
+    - openclaw_autoupdate_enabled | bool
+    - not ci_test
+
 - name: Configure .bashrc for openclaw user (base config)
   ansible.builtin.blockinfile:
     path: "{{ openclaw_home }}/.bashrc"
@@ -95,7 +116,14 @@
     block: |
       # pnpm configuration
       export PNPM_HOME="{{ openclaw_home }}/.local/share/pnpm"
-      export PATH="{{ openclaw_home }}/.local/bin:$PNPM_HOME:$PATH"
+      export PATH="{{ openclaw_home }}/.local/bin:$PNPM_HOME:/opt/openclaw/bin:$PATH"
+
+      # Python user installs
+      export PATH="{{ openclaw_home }}/.local/bin:$PATH"
+
+      # Editor defaults
+      export EDITOR=vim
+      export VISUAL=vim
     create: true
     owner: "{{ openclaw_user }}"
     group: "{{ openclaw_user }}"
@@ -105,6 +133,41 @@
 # NOTE: We do NOT create config.yml here - openclaw onboard/configure will do that
 # We also do NOT install the systemd service - openclaw onboard --install-daemon will do that
 # The .openclaw directory structure is created above, but config and daemon are user-initiated
+
+# We DO manage the elevated tools policy - this controls which Telegram senders can invoke
+# privileged agent tools. Safe to set before onboarding; onboard only writes fields it owns.
+- name: Configure OpenClaw elevated tools policy in openclaw.json
+  ansible.builtin.shell:
+    cmd: |
+      python3 - <<'PYEOF'
+      import json, os
+      p = '{{ openclaw_config_dir }}/openclaw.json'
+      cfg = json.load(open(p)) if os.path.exists(p) else {}
+      desired = {'enabled': True, 'allowFrom': {'telegram': {{ openclaw_elevated_telegram_senders | to_json }}}}
+      current = cfg.get('tools', {}).get('elevated', {})
+      if current != desired:
+          cfg.setdefault('tools', {})
+          cfg['tools']['elevated'] = desired
+          open(p, 'w').write(json.dumps(cfg, indent=2) + '\n')
+          print('changed')
+      PYEOF
+    executable: /bin/bash
+  become: true
+  become_user: "{{ openclaw_user }}"
+  environment:
+    HOME: "{{ openclaw_home }}"
+  register: elevated_config_result
+  changed_when: "'changed' in elevated_config_result.stdout"
+  when: openclaw_elevated_telegram_senders | length > 0
+
+- name: Restart openclaw gateway after elevated config change
+  ansible.builtin.systemd:
+    name: openclaw
+    state: restarted
+  when:
+    - elevated_config_result is changed
+    - not ci_test
+  ignore_errors: true  # Service may not exist yet (requires: openclaw onboard --install-daemon)
 
 - name: Display configuration note
   ansible.builtin.debug:

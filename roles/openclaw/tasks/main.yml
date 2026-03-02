@@ -2,6 +2,10 @@
 - name: Include system tools installation tasks
   ansible.builtin.include_tasks: system-tools.yml
 
+- name: Include browser system dependencies
+  ansible.builtin.include_tasks: browser-linux.yml
+  when: openclaw_browser_enabled | bool
+
 - name: Include Tailscale installation tasks
   ansible.builtin.include_tasks: tailscale-linux.yml
   when: tailscale_enabled | bool

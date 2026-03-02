@@ -40,3 +40,17 @@ openclaw_repo_dir: "{{ openclaw_code_dir }}/openclaw"
 #     - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx user@host"
 #     - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDxxxxxxxxxxxxxxxxxxxxxxx user@host"
 openclaw_ssh_keys: []
+
+# Browser capabilities for AI agent automation (Playwright/Puppeteer)
+# Installs system-level browser dependencies and optionally Chromium
+openclaw_browser_enabled: true
+openclaw_browser_install_chromium: true
+
+# Auto-update OpenClaw via systemd timer (release mode only)
+# Runs daily and updates to the latest release from npm
+openclaw_autoupdate_enabled: true
+
+# Elevated tools configuration
+# Telegram sender IDs allowed to invoke elevated tools without extra confirmation
+# Example: ["8584223237"]
+openclaw_elevated_telegram_senders: []

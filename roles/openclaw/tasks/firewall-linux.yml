@@ -54,18 +54,21 @@
       APT::Periodic::Unattended-Upgrade "1";
       APT::Periodic::AutocleanInterval "7";
 
-- name: Configure unattended-upgrades to only install security updates
+- name: Configure unattended-upgrades for all package updates
   ansible.builtin.copy:
     dest: /etc/apt/apt.conf.d/50unattended-upgrades
     owner: root
     group: root
     mode: '0644'
     content: |
-      // OpenClaw security hardening - automatic security updates
+      // OpenClaw - automatic updates (all packages, not just security)
       Unattended-Upgrade::Allowed-Origins {
+          "${distro_id}:${distro_codename}";
+          "${distro_id}:${distro_codename}-updates";
           "${distro_id}:${distro_codename}-security";
           "${distro_id}ESMApps:${distro_codename}-apps-security";
           "${distro_id}ESM:${distro_codename}-infra-security";
+          "${distro_id}:${distro_codename}-backports";
       };
       Unattended-Upgrade::Package-Blacklist {
       };

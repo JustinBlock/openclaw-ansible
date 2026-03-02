@@ -36,11 +36,33 @@
       - tree
       - jq
       - unzip
+      - zip
       - rsync
       - less
+      - bc
+      - ncdu
+      - psmisc
+      - moreutils
+      - parallel
       # Build essentials for development
       - build-essential
       - file
+      - pkg-config
+      # Python scripting and automation
+      - python3
+      - python3-pip
+      - python3-venv
+      - python3-dev
+      # Media processing (for agents working with images/video/audio/docs)
+      - ffmpeg
+      - imagemagick
+      - ghostscript
+      - pandoc
+      # Modern search and file tools
+      - ripgrep
+      - fd-find
+      # Data storage
+      - sqlite3
     state: present
     update_cache: true
 

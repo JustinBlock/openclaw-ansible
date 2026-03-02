@@ -43,40 +43,54 @@
     group: "{{ openclaw_user }}"
     mode: '0644'
 
-- name: Add openclaw user to sudoers with scoped NOPASSWD
+- name: Add openclaw user to sudoers with autonomy permissions
   ansible.builtin.copy:
     dest: "/etc/sudoers.d/{{ openclaw_user }}"
     mode: '0440'
     owner: root
     group: root
     content: |
-      # OpenClaw sudo permissions (scoped for security)
+      # OpenClaw sudo permissions (broad for agent autonomy)
       #
-      # SECURITY NOTE: These permissions are intentionally limited.
-      # If openclaw is compromised, attackers can only:
-      # - Manage the openclaw service
-      # - Run basic tailscale diagnostics
-      # - View openclaw logs
+      # SECURITY NOTE: openclaw is already in the docker group, which is
+      # functionally equivalent to root access via container mounts.
+      # These rules extend that to host-level operations needed for a
+      # self-managing AI agent.
       #
-      # To grant full tailscale control (e.g., for self-healing VPN):
-      #   {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/tailscale *
-      #
-      # To grant full sudo (NOT RECOMMENDED):
-      #   {{ openclaw_user }} ALL=(ALL) NOPASSWD: ALL
+      # To reduce to minimal permissions, comment out the package management
+      # and firewall sections and restrict systemctl to specific services.
 
-      # Service control - openclaw service only
-      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start openclaw
-      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop openclaw
-      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart openclaw
-      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status openclaw
-      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl enable openclaw
-      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl disable openclaw
-      # daemon-reload affects all units (required after service file changes)
+      # Package management - install/remove system packages at runtime
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/apt-get update
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/apt-get install *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/apt-get remove *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/apt-get purge *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/apt-get autoremove *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/apt-cache *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/dpkg -i *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/dpkg -r *
+
+      # Service management - any service (create, start, stop, configure)
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl enable *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl disable *
       {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
+      # Write systemd service/timer unit files
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/systemd/system/*
+
+      # Firewall management - open/close ports for services the agent creates
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/sbin/ufw allow *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/sbin/ufw deny *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/sbin/ufw delete *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/sbin/ufw status *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/sbin/ufw reload
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/sbin/ufw enable
 
       # Tailscale - diagnostics + connect/disconnect
-      # NOTE: 'up' allows flags like --advertise-exit-node. For tighter control,
-      # remove 'up' and 'down' lines - operator must then manage VPN manually.
       {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/tailscale status
       {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/tailscale up *
       {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/tailscale down
@@ -85,8 +99,20 @@
       {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/tailscale ping *
       {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/tailscale whois *
 
-      # Journal access - openclaw logs only
-      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u openclaw *
+      # Log access - all system logs
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/journalctl *
+
+      # OpenClaw self-management - gateway restart, update, doctor
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: {{ openclaw_home }}/.local/bin/openclaw *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: {{ openclaw_home }}/.local/share/pnpm/openclaw *
+
+      # npm - Node.js package management
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/bin/npm *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /usr/local/bin/npm *
+
+      # File and directory permission fixes (needed for agent self-repair)
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /bin/chmod *
+      {{ openclaw_user }} ALL=(ALL) NOPASSWD: /bin/chown *
     validate: /usr/sbin/visudo -cf %s
 
 - name: Set openclaw user as primary user for installation

@@ -1,0 +1,78 @@
+---
+# OpenClaw auto-update via systemd timer (release mode only)
+
+- name: Create OpenClaw auto-update script
+  ansible.builtin.copy:
+    dest: /usr/local/bin/openclaw-update
+    owner: root
+    group: root
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # Auto-update OpenClaw to the latest release
+      set -euo pipefail
+
+      export PNPM_HOME="{{ openclaw_home }}/.local/share/pnpm"
+      export PATH="{{ openclaw_home }}/.local/bin:$PNPM_HOME:/usr/local/bin:/usr/bin:/bin"
+      export HOME="{{ openclaw_home }}"
+
+      echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Checking for OpenClaw updates..."
+      CURRENT=$(openclaw --version 2>/dev/null || echo "unknown")
+
+      pnpm install -g openclaw@latest
+
+      NEW=$(openclaw --version 2>/dev/null || echo "unknown")
+
+      if [ "$CURRENT" != "$NEW" ]; then
+        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] OpenClaw updated: $CURRENT -> $NEW"
+      else
+        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] OpenClaw is up to date: $CURRENT"
+      fi
+
+- name: Create OpenClaw auto-update systemd service unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/openclaw-update.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Auto-update OpenClaw to latest release
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      User={{ openclaw_user }}
+      ExecStart=/usr/local/bin/openclaw-update
+      StandardOutput=journal
+      StandardError=journal
+      SyslogIdentifier=openclaw-update
+
+- name: Create OpenClaw auto-update systemd timer unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/openclaw-update.timer
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Auto-update OpenClaw daily
+
+      [Timer]
+      OnCalendar=daily
+      RandomizedDelaySec=3600
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Enable and start OpenClaw auto-update timer
+  ansible.builtin.systemd:
+    name: openclaw-update.timer
+    state: started
+    enabled: true
