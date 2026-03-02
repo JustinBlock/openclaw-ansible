@@ -130,6 +130,72 @@
     mode: '0644'
     insertafter: EOF
 
+# Stop and disable root's openclaw-gateway.service if it somehow got installed.
+# This can happen if openclaw was ever run/onboarded as root directly. Root's user
+# systemd will keep restarting the old gateway, causing port 18789 conflicts.
+- name: Check if root user has an openclaw-gateway service installed
+  ansible.builtin.stat:
+    path: /root/.config/systemd/user/openclaw-gateway.service
+  register: root_openclaw_service
+  when: not ci_test
+
+- name: Stop and disable root's openclaw-gateway service (prevents port conflicts)
+  ansible.builtin.shell:
+    cmd: |
+      XDG_RUNTIME_DIR=/run/user/0 systemctl --user stop openclaw-gateway.service 2>/dev/null || true
+      XDG_RUNTIME_DIR=/run/user/0 systemctl --user disable openclaw-gateway.service 2>/dev/null || true
+      pkill -9 -f openclaw-gateway 2>/dev/null || true
+    executable: /bin/bash
+  when:
+    - not ci_test
+    - root_openclaw_service.stat.exists | default(false)
+
+# Create a systemd drop-in override for the openclaw-gateway service.
+# This ensures critical settings are applied regardless of what openclaw's
+# onboarding writes (openclaw onboard --install-daemon manages the main unit).
+#
+# KillMode=control-group: kills all child processes when the service stops,
+#   preventing orphaned openclaw-gateway processes from holding port 18789.
+# OPENCLAW_NO_RESPAWN=1: prevents the gateway from spawning a detached child
+#   process, keeping systemd in control of the main PID (Type=simple).
+- name: Create systemd drop-in directory for openclaw-gateway service
+  ansible.builtin.file:
+    path: "{{ openclaw_home }}/.config/systemd/user/openclaw-gateway.service.d"
+    state: directory
+    owner: "{{ openclaw_user }}"
+    group: "{{ openclaw_user }}"
+    mode: '0755'
+
+- name: Write systemd drop-in override for openclaw-gateway service
+  ansible.builtin.copy:
+    dest: "{{ openclaw_home }}/.config/systemd/user/openclaw-gateway.service.d/99-ansible.conf"
+    owner: "{{ openclaw_user }}"
+    group: "{{ openclaw_user }}"
+    mode: '0644'
+    content: |
+      # Ansible-managed drop-in for openclaw-gateway.service
+      # Applied on top of the unit file installed by: openclaw onboard --install-daemon
+      [Service]
+      # Kill all cgroup members (including spawned children) on stop/restart.
+      # Without this, orphaned openclaw-gateway processes hold port 18789 and
+      # block subsequent service starts.
+      KillMode=control-group
+      # Prevent the gateway launcher from spawning a detached child process.
+      # With this set, the gateway runs in-process and systemd tracks the main PID.
+      Environment=OPENCLAW_NO_RESPAWN=1
+  register: openclaw_dropin
+
+- name: Reload openclaw user systemd daemon after drop-in change
+  ansible.builtin.shell:
+    cmd: |
+      XDG_RUNTIME_DIR=/run/user/{{ openclaw_uid_value }} \
+      DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ openclaw_uid_value }}/bus \
+      systemctl --user daemon-reload
+    executable: /bin/bash
+  when:
+    - openclaw_dropin is changed
+    - not ci_test
+
 # NOTE: We do NOT create config.yml here - openclaw onboard/configure will do that
 # We also do NOT install the systemd service - openclaw onboard --install-daemon will do that
 # The .openclaw directory structure is created above, but config and daemon are user-initiated
